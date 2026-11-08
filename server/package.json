@@ -1,7 +1,7 @@
 {
   "name": "arham-bse-api",
   "version": "1.0.0",
-  "description": "Mock BSE Exchange API with SSE real-time push + MongoDB persistence",
+  "description": "Mock BSE Exchange API with SSE real-time push + MySQL persistence",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -13,7 +13,7 @@
     "trades",
     "sse",
     "mock-api",
-    "mongodb"
+    "mysql"
   ],
   "license": "ISC",
   "dependencies": {
@@ -23,7 +23,7 @@
     "express": "^4.18.2",
     "express-rate-limit": "^8.7.3",
     "helmet": "^8.0.0",
-    "mongoose": "^8.4.0",
+    "mysql2": "3.11.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

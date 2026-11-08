@@ -1,49 +1,74 @@
-const { acquirePullLock, renewPullLock, releasePullLock, __setModelForTest } = require('../pullLock');
+/**
+ * pullLock.test.js — unit tests for the distributed MySQL-backed pull lock.
+ *
+ * Uses the __setPoolForTest seam in models/PullLock.js to inject an in-memory
+ * fake pool. No real DB needed. The fake mimics MySQL's conditional UPDATE
+ * affectedRows=1/0 semantics.
+ */
+const LockModel = require('../models/PullLock');
+const { acquirePullLock, renewPullLock, releasePullLock } = require('../pullLock');
 
-// In-memory fake of the PullLock model that mimics MongoDB's atomic
-// findOneAndUpdate / updateOne semantics for the single "pull-lock" document.
-let doc = null;
+let lockDoc = null; // { holder, expires_at }
 
-const fakeModel = {
-  async findOneAndUpdate(filter, update, opts) {
-    const now = Date.now();
-    const held = doc && doc.holder != null;
-    const expired = doc && doc.expiresAt != null && new Date(doc.expiresAt).getTime() < now;
-    const acquirable = !doc || !held || expired;
-    if (doc && !acquirable) {
-      // exists, held, not expired -> upsert collides on the fixed _id -> E11000
-      if (opts && opts.upsert) {
-        const e = new Error('E11000 duplicate key');
-        e.code = 11000;
-        throw e;
+function makePool() {
+  return {
+    async execute(sql, params = []) {
+      const now = new Date();
+      // INSERT IGNORE — always a no-op / success
+      if (sql.includes('INSERT IGNORE')) {
+        if (!lockDoc) lockDoc = { holder: null, expires_at: null };
+        return [{ affectedRows: 1 }];
       }
-      return null;
-    }
-    doc = { _id: 'pull-lock', holder: update.$set.holder, expiresAt: update.$set.expiresAt };
-    return doc;
-  },
-  async updateOne(filter, update) {
-    if (doc && filter.holder != null && doc.holder === filter.holder) {
-      if (Object.prototype.hasOwnProperty.call(update.$set, 'holder')) doc.holder = update.$set.holder;
-      if (Object.prototype.hasOwnProperty.call(update.$set, 'expiresAt')) doc.expiresAt = update.$set.expiresAt;
-      return { modifiedCount: 1 };
-    }
-    return { modifiedCount: 0 };
-  },
-};
+      // UPDATE acquire: holder IS NULL OR expires_at < now
+      if (sql.includes('holder IS NULL')) {
+        const [holder, expiresAt] = params;
+        const held    = lockDoc && lockDoc.holder != null;
+        const expired = lockDoc && lockDoc.expires_at != null &&
+                        new Date(lockDoc.expires_at).getTime() < now.getTime();
+        if (!held || expired) {
+          lockDoc = { holder, expires_at: expiresAt };
+          return [{ affectedRows: 1 }];
+        }
+        return [{ affectedRows: 0 }];
+      }
+      // UPDATE renew: SET expires_at=? WHERE … holder=?  (2 params: expiresAt, holder)
+      if (sql.includes('expires_at=?') && !sql.includes('NULL') && params.length === 2) {
+        const [expiresAt, holder] = params;
+        if (lockDoc && lockDoc.holder === holder) {
+          lockDoc.expires_at = expiresAt;
+          return [{ affectedRows: 1 }];
+        }
+        return [{ affectedRows: 0 }];
+      }
+      // UPDATE release: SET holder=NULL … WHERE … holder=?
+      if (sql.includes('holder=NULL')) {
+        const [holder] = params;
+        if (lockDoc && lockDoc.holder === holder) {
+          lockDoc = { holder: null, expires_at: null };
+          return [{ affectedRows: 1 }];
+        }
+        return [{ affectedRows: 0 }];
+      }
+      return [{ affectedRows: 0 }];
+    },
+  };
+}
 
-function expireLease() { if (doc) doc.expiresAt = new Date(Date.now() - 1000); }
+function expireLease() {
+  if (lockDoc) lockDoc.expires_at = new Date(Date.now() - 1000);
+}
 
 beforeEach(() => {
-  doc = null;
-  __setModelForTest(fakeModel);
+  lockDoc = null;
+  LockModel.__setPoolForTest(makePool());
 });
 
 afterEach(() => {
-  doc = null;
+  lockDoc = null;
+  LockModel.__setPoolForTest(null);
 });
 
-describe('pullLock — distributed pull-concurrency lock', () => {
+describe('pullLock — distributed pull-concurrency lock (MySQL)', () => {
   it('acquires the lock when free', async () => {
     const lock = await acquirePullLock(60000);
     expect(lock).not.toBeNull();
@@ -71,7 +96,7 @@ describe('pullLock — distributed pull-concurrency lock', () => {
 
   it('allows takeover once the lease has expired', async () => {
     await acquirePullLock(60000);
-    expireLease(); // simulate the holder crashing / lease lapsing
+    expireLease();
     const takeover = await acquirePullLock(60000);
     expect(takeover).not.toBeNull();
   });

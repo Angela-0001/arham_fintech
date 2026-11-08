@@ -162,7 +162,7 @@ async function boot() {
     console.log(`\n🚀  BSE API → http://localhost:${PORT}`);
     console.log(`   /proxy/*  — BFF (no key needed from browser)`);
     console.log(`   /getTrades — direct API (requires Bearer key)`);
-    console.log(`   DB: ${isDbConnected() ? "MongoDB Atlas ✓" : "in-memory"}`);
+    console.log(`   DB: ${isDbConnected() ? "MySQL ✓" : "in-memory"}`);
   });
 
   const existing = getCommittedTrades();

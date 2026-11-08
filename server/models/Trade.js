@@ -1,36 +1,53 @@
 /**
- * Trade.js — Mongoose model for a BSE trade record.
+ * Trade.js — MySQL helpers for the trades table.
  *
- * Uses tradeId as the natural unique key (_id override) so upserts
- * are idempotent — running the same pull twice won't create duplicates.
+ * All writes are INSERT … ON DUPLICATE KEY UPDATE so re-running a pull
+ * is idempotent — same tradeId → update, never duplicate.
  */
+const { getPool } = require("../db");
 
-const mongoose = require("mongoose");
+/**
+ * Upsert a batch of trades.
+ * Uses INSERT … ON DUPLICATE KEY UPDATE (MySQL idempotent upsert).
+ * @param {Array} trades
+ */
+async function bulkUpsertTrades(trades) {
+  const pool = getPool();
+  if (!pool || trades.length === 0) return;
 
-const tradeSchema = new mongoose.Schema(
-  {
-    _id:       { type: String },          // tradeId used as _id (e.g. "BSE000001")
-    tradeId:   { type: String, required: true },
-    client:    { type: String, required: true },
-    symbol:    { type: String, required: true, index: true },
-    series:    { type: String },
-    tradeType: { type: String, enum: ["BUY", "SELL"], index: true },
-    exchange:  { type: String },
-    quantity:  { type: Number, required: true },
-    price:     { type: Number, required: true },
-    value:     { type: Number, required: true },
-    tradeDate: { type: String },
-    timestamp: { type: String, index: true },
-  },
-  {
-    _id: false,       // we manage _id ourselves (= tradeId)
-    versionKey: false,
-    collection: "trades",
-  }
-);
+  // Build a single multi-row INSERT … ON DUPLICATE KEY UPDATE
+  const placeholders = trades.map(() =>
+    "(?,?,?,?,?,?,?,?,?,?,?)"
+  ).join(",");
 
-// Compound index for common dashboard queries
-tradeSchema.index({ symbol: 1, timestamp: -1 });
-tradeSchema.index({ tradeType: 1, timestamp: -1 });
+  const values = trades.flatMap(t => [
+    t.tradeId, t.client, t.symbol, t.series,
+    t.tradeType, t.exchange, t.quantity, t.price,
+    t.value, t.tradeDate, t.timestamp,
+  ]);
 
-module.exports = mongoose.model("Trade", tradeSchema);
+  await pool.execute(
+    `INSERT INTO trades
+       (trade_id,client,symbol,series,trade_type,exchange,quantity,price,value,trade_date,timestamp)
+     VALUES ${placeholders}
+     ON DUPLICATE KEY UPDATE
+       client=VALUES(client), symbol=VALUES(symbol), series=VALUES(series),
+       trade_type=VALUES(trade_type), exchange=VALUES(exchange),
+       quantity=VALUES(quantity), price=VALUES(price),
+       value=VALUES(value), trade_date=VALUES(trade_date), timestamp=VALUES(timestamp)`,
+    values
+  );
+}
+
+/** Load all trades from the DB. */
+async function findAllTrades() {
+  const pool = getPool();
+  if (!pool) return [];
+  const [rows] = await pool.execute(
+    "SELECT trade_id as tradeId, client, symbol, series, trade_type as tradeType, " +
+    "exchange, quantity, price, value, trade_date as tradeDate, timestamp FROM trades"
+  );
+  return rows;
+}
+
+module.exports = { bulkUpsertTrades, findAllTrades };

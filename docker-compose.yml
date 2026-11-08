@@ -5,13 +5,18 @@ services:
       dockerfile: server/Dockerfile
     environment:
       NODE_ENV: production
-      MONGO_URI: mongodb://mongo:27017/bse_trades
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: bse
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme}
+      MYSQL_DATABASE: bse_trades
       API_KEY: ${API_KEY:-change-me-in-production}
       ALLOWED_ORIGINS: http://localhost:8080
       TRUST_PROXY: "1"
       PULL_DURATION_MS: "900000"
     depends_on:
-      - mongo
+      mysql:
+        condition: service_healthy
     ports:
       - "4000:4000"
 
@@ -24,10 +29,20 @@ services:
     ports:
       - "8080:80"
 
-  mongo:
-    image: mongo:7
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: bse_trades
+      MYSQL_USER: bse
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme}
     volumes:
-      - mongo-data:/data/db
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "bse", "--password=${MYSQL_PASSWORD:-changeme}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  mongo-data:
+  mysql-data:
