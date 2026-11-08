@@ -5,4 +5,9 @@ client/dist/
 server/.env
 client/.env
 .env
+.env*
+!.env.example
 *.log
+# agent/internal tooling artifacts (not part of the deliverable)
+.agents/
+logs/

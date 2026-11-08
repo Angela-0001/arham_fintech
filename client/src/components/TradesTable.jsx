@@ -29,21 +29,37 @@ function fmtNum(n) {
 
 export function TradesTable({ trades, sortField, sortDir, onSort }) {
   const thStyle = (align) => ({
-    padding: '10px 14px',
+    padding: 0,
     textAlign: align,
     fontSize: 11,
     fontWeight: 600,
     color: 'var(--text-muted)',
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
-    cursor: 'pointer',
-    userSelect: 'none',
     whiteSpace: 'nowrap',
     borderBottom: '1px solid var(--border)',
     background: 'var(--surface)',
     position: 'sticky',
     top: 0,
     zIndex: 1,
+  });
+
+  // The sort button fills the cell so the whole header is clickable and
+  // keyboard-operable (tab + Enter/Space).
+  const sortBtnStyle = (align) => ({
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
+    padding: '10px 14px',
+    border: 'none',
+    background: 'inherit',
+    color: 'inherit',
+    font: 'inherit',
+    textTransform: 'inherit',
+    letterSpacing: 'inherit',
+    cursor: 'pointer',
+    userSelect: 'none',
   });
 
   const tdStyle = (align, extra = {}) => ({
@@ -67,12 +83,19 @@ export function TradesTable({ trades, sortField, sortDir, onSort }) {
               {COLS.map(col => (
                 <th
                   key={col.field}
+                  scope="col"
                   style={thStyle(col.align)}
-                  onClick={() => onSort(col.field)}
                   aria-sort={sortField === col.field ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 >
-                  {col.label}
-                  <SortArrow field={col.field} sortField={sortField} sortDir={sortDir} />
+                  <button
+                    type="button"
+                    style={sortBtnStyle(col.align)}
+                    aria-label={`Sort by ${col.label}`}
+                    onClick={() => onSort(col.field)}
+                  >
+                    {col.label}
+                    <SortArrow field={col.field} sortField={sortField} sortDir={sortDir} />
+                  </button>
                 </th>
               ))}
             </tr>

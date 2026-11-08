@@ -34,7 +34,14 @@ export function PullStatus({ pullStatus }) {
             {pulledRecords.toLocaleString()} / {totalRecords.toLocaleString()} records
           </span>
         </div>
-        <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+        <div
+          role="progressbar"
+          aria-label="Pull progress"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}
+        >
           <div style={{
             height: '100%',
             width: `${progress}%`,

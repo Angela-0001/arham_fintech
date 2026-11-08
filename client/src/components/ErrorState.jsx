@@ -1,6 +1,8 @@
 /**
  * ErrorState.jsx — shown when server is unreachable (Fix #5)
  */
+import { API_URL } from '../config.js';
+
 export function ErrorState({ onRetry }) {
   return (
     <div style={{
@@ -22,7 +24,7 @@ export function ErrorState({ onRetry }) {
         <div style={{ color: 'var(--text-muted)', fontSize: 13, maxWidth: 340 }}>
           Cannot connect to the BSE API server at{' '}
           <code style={{ color: 'var(--accent)' }}>
-            {import.meta.env.VITE_API_URL || 'http://localhost:4000'}
+            {API_URL}
           </code>.
           Make sure the server is running.
         </div>

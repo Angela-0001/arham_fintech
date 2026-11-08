@@ -8,7 +8,9 @@ const express    = require("express");
 const router     = express.Router();
 const rateLimit  = require("express-rate-limit");
 const { v4: uuidv4 } = require("uuid");
+// Wrap async handlers so rejected promises reach Express error handling
 const { validateTradeQuery } = require("../middleware/validate");
+const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const {
   getCommittedTrades, getPullStatus,
   startPull, addSseClient, removeSseClient,
@@ -43,16 +45,17 @@ router.get("/getTrades", validateTradeQuery, (req, res) => {
   if (from)      result = result.filter(t => t.timestamp >= from);
   if (to)        result = result.filter(t => t.timestamp <= to);
 
-  const pageSize   = Math.min(parseInt(req.query.pageSize || "200", 10), 500);
-  const pageNum    = Math.max(parseInt(req.query.page    || "1",   10), 1);
+  // page/pageSize are validated + normalized by validateTradeQuery middleware
+  const page      = req.query.page;
+  const pageSize  = req.query.pageSize;
   const total      = result.length;
   const totalPages = Math.ceil(total / pageSize);
-  const paginated  = result.slice((pageNum - 1) * pageSize, pageNum * pageSize);
+  const paginated  = result.slice((page - 1) * pageSize, page * pageSize);
 
   res.json({
     success: true,
     meta: {
-      total, page: pageNum, pageSize, totalPages,
+      total, page, pageSize, totalPages,
       pullState: status.state, lastPulledAt: status.completedAt,
       dbConnected: isDbConnected(),
     },
@@ -64,12 +67,12 @@ router.get("/getTrades", validateTradeQuery, (req, res) => {
 router.get("/pull/status", (_req, res) => res.json(getPullStatus()));
 
 // POST /proxy/pull/start
-router.post("/pull/start", proxyPullLimiter, async (_req, res) => {
+router.post("/pull/start", proxyPullLimiter, asyncHandler(async (_req, res) => {
   const result = await startPull();
   result.started
     ? res.json({ success: true, message: "Pull started", pullStatus: getPullStatus() })
     : res.status(409).json({ success: false, message: result.reason });
-});
+}));
 
 // GET /proxy/events — SSE (no key, BFF handles auth)
 router.get("/events", (req, res) => {

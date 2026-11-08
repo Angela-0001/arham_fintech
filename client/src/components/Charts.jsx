@@ -67,7 +67,7 @@ export function Charts({ trades }) {
   return (
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
 
-      <div style={card}>
+      <div style={card} role="img" aria-label="Buy vs Sell Volume chart">
         <div style={title}>Buy vs Sell Volume</div>
         <ResponsiveContainer width="100%" height={200}>
           <PieChart>
@@ -83,7 +83,7 @@ export function Charts({ trades }) {
         </ResponsiveContainer>
       </div>
 
-      <div style={{ ...card, minWidth: 340, flex: 2 }}>
+      <div style={{ ...card, minWidth: 340, flex: 2 }} role="img" aria-label="Top 10 Symbols by Trades chart">
         <div style={title}>Top 10 Symbols by Trades</div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={topSymbols} margin={{ top: 0, right: 8, bottom: 0, left: -16 }}>
@@ -98,7 +98,7 @@ export function Charts({ trades }) {
         </ResponsiveContainer>
       </div>
 
-      <div style={{ ...card, minWidth: 340, flex: 2 }}>
+      <div style={{ ...card, minWidth: 340, flex: 2 }} role="img" aria-label="Trade Value by Date chart">
         <div style={title}>Trade Value by Date (₹M)</div>
         <ResponsiveContainer width="100%" height={200}>
           <AreaChart data={valueByDate} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>

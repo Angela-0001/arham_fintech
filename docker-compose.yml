@@ -1,0 +1,33 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      NODE_ENV: production
+      MONGO_URI: mongodb://mongo:27017/bse_trades
+      API_KEY: ${API_KEY:-change-me-in-production}
+      ALLOWED_ORIGINS: http://localhost:8080
+      TRUST_PROXY: "1"
+      PULL_DURATION_MS: "900000"
+    depends_on:
+      - mongo
+    ports:
+      - "4000:4000"
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    depends_on:
+      - server
+    ports:
+      - "8080:80"
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:

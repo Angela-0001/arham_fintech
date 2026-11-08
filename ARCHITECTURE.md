@@ -32,16 +32,17 @@ SSE is HTTP/1.1-compatible, unidirectional (server→client, which is all we nee
 │                         Browser (React)                          │
 │                                                                   │
 │  ┌─────────────────┐    useTrades hook                          │
-│  │  GET /getTrades  │◄──── on mount → instant data load         │
+│  │  GET /proxy/      │◄──── on mount → instant data load        │
+│  │     getTrades     │                                           │
 │  └─────────────────┘                                             │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  EventSource  /api/events   (SSE)                        │   │
+│  │  EventSource  /proxy/events   (SSE)                      │   │
 │  │                                                           │   │
-│  │  ← init          (current state on connect)              │   │
+│  │  ← init          (current state + committed count)      │   │
 │  │  ← pull_started  (pull kicked off)                       │   │
 │  │  ← pull_progress (every batch, 20× over 15 min)         │   │
-│  │  ← pull_complete (full 2000-trade payload)               │   │
+│  │  ← pull_complete (signal — client re-fetches via REST) │   │
 │  │                                                           │   │
 │  │  If network kills conn (>30s):                           │   │
 │  │    EventSource auto-reconnects in 3s                     │   │
@@ -49,14 +50,14 @@ SSE is HTTP/1.1-compatible, unidirectional (server→client, which is all we nee
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                                 │
-                   HTTP (Vite proxy in dev)
+                   HTTP (BFF proxy — no key in browser)
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Express Server (:4000)                      │
 │                                                                   │
-│  GET /getTrades ──────────► returns committedTrades[] (instant) │
+│  GET /proxy/getTrades ────► returns committedTrades[] (instant) │
 │  POST /api/pull/start ────► starts pull job (async)             │
-│  GET /api/events ─────────► SSE stream, one per browser tab     │
+│  GET /proxy/events ───────► SSE stream, one per browser tab     │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  pullManager.js                                           │   │
@@ -64,15 +65,16 @@ SSE is HTTP/1.1-compatible, unidirectional (server→client, which is all we nee
 │  │  committedTrades[]  ◄── swap on pull_complete            │   │
 │  │                                                           │   │
 │  │  Pull job (async):                                        │   │
-│  │   generate 2000 trades                                    │   │
+│  │   generate 2000 trades (time-bucketed seed)              │   │
 │  │   drip in 20 batches × (15min / 20) = 45s each          │   │
-│  │   broadcast pull_progress per batch                       │   │
-│  │   on done: commit + broadcast pull_complete              │   │
+│  │   broadcast pull_progress per batch (delta only)         │   │
+│  │   on done: commit + broadcast pull_complete (signal)    │   │
 │  │                                                           │   │
 │  │  SSE registry: Map<clientId, res>                        │   │
+│  │  Ring buffer: last 200 events (replay via Last-Event-ID) │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                   │
-│  seed.js ─── mulberry32 PRNG (seeded=42) ─── reproducible data  │
+│  seed.js ─── mulberry32 PRNG (time-bucketed seed, stored in checkpoint) ─── reproducible + resumable
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,32 +84,59 @@ SSE is HTTP/1.1-compatible, unidirectional (server→client, which is all we nee
 
 ```
 1. User opens dashboard
-   → React mounts, calls GET /getTrades
-   → Gets existing committed trades (0 on first boot, 2000 after pull)
-   → Opens EventSource to /api/events
-   → Server sends "init" event immediately
+   → React mounts, calls GET /proxy/getTrades
+   → Gets existing committed trades (0 on first boot, 2000 after a pull)
+   → Opens EventSource to /proxy/events
+   → Server sends "init" event immediately (state + committed count)
 
-2. User clicks "New Pull" (or server auto-pulls on startup)
+2. Server auto-starts a pull on startup (or user clicks "New Pull")
    → POST /api/pull/start
    → Server starts async pull job (15-min drip simulation)
    → Broadcasts "pull_started" → dashboard shows progress bar
 
 3. Every ~45 seconds (each of 20 batches)
-   → Server broadcasts "pull_progress" with % done
+   → Server broadcasts "pull_progress" with % done + the new-trades delta
    → Progress bar updates in all open tabs — no page refresh
 
 4. Pull finishes
-   → committedTrades swapped atomically
-   → Server broadcasts "pull_complete" with full 2000-trade payload
-   → React state updated: setTrades(data.trades)
-   → Dashboard shows all trades instantly — no refresh, no polling
+   → committedTrades swapped
+   → Server broadcasts "pull_complete" — a lightweight SIGNAL (not the payload)
+   → Client sees it and re-fetches the full dataset via REST
+   → React state updated → dashboard shows all trades instantly
 
 5. Network kills SSE connection after 30s
    → EventSource reconnects in ~3s
    → Sends Last-Event-ID header
-   → Server sends "init" event with current state
+   → Server replays missed events from its 200-event ring buffer
    → No data loss
 ```
+
+---
+
+## Persistence & Resume
+
+- **Idempotent writes:** on completion, trades are upserted with `bulkWrite`
+  keyed on `tradeId` (`_id = tradeId`). Re-running a pull updates rather than
+  duplicates — safe to retry.
+- **Checkpoint:** each batch saves only the staged trade IDs + the pull's seed
+  to a single `pull_checkpoint` document (compact — never near the 16MB limit).
+- **Resume:** on restart, if a checkpoint shows a pull in progress, the server
+  regenerates the full trade set from the **stored seed** and filters by the
+  saved IDs, then continues from the next batch. Using the stored seed (not a
+  fresh time-bucketed one) keeps resumed data consistent even if the restart
+  crosses a 5-minute seed boundary.
+
+---
+
+## Pull Concurrency (horizontal scaling)
+
+- **Single instance (dev):** an in-memory `pullStatus.state === "running"` flag
+  prevents a second pull on the same process.
+- **Multiple replicas (production):** a MongoDB-backed lease
+  (`pull_lock` collection) guards `startPull` with an atomic conditional
+  update — a replica only starts a pull if the lock is unheld or its lease has
+  expired. The lease is renewed each batch and released on completion/failure,
+  so a crashed replica's lock auto-expires and another replica can take over.
 
 ---
 

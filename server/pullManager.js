@@ -8,11 +8,11 @@
  * Fix #4b — event replay via in-memory ring buffer (200 events)
  */
 
-require("dotenv").config();
 const { generateTrades }    = require("./seed");
 const { isDbConnected }     = require("./db");
 const Trade                 = require("./models/Trade");
 const PullCheckpoint        = require("./models/PullCheckpoint");
+const { acquirePullLock, renewPullLock, releasePullLock } = require("./pullLock");
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let committedTrades = [];
@@ -30,6 +30,8 @@ const eventLog   = [];
 let   eventCtr   = 0;
 
 const PULL_DURATION_MS = parseInt(process.env.PULL_DURATION_MS || String(15 * 60 * 1000), 10);
+// Distributed pull lock: lease must outlast the longest pull, plus a buffer.
+const LOCK_LEASE_MS = PULL_DURATION_MS + 5 * 60 * 1000;
 
 // ─── DB bootstrap ─────────────────────────────────────────────────────────────
 async function loadFromDB() {
@@ -39,8 +41,9 @@ async function loadFromDB() {
     const cp = await PullCheckpoint.findById("singleton").lean();
     if (cp && cp.state === "running" && cp.stagedTradeIds?.length > 0) {
       console.log(`[DB] Found interrupted pull at batch ${cp.batchNumber}/${cp.totalBatches} — resuming.`);
-      // Regenerate full trade objects from deterministic seed, filtered by saved IDs
-      const allTrades  = generateTrades(2000);
+      // Regenerate full trade objects from the SAME seed used for this pull
+      // (stored in the checkpoint) so resume across a 5-minute boundary is consistent.
+      const allTrades  = generateTrades(2000, cp.pullSeed);
       const idSet      = new Set(cp.stagedTradeIds);
       stagingTrades    = allTrades.filter(t => idSet.has(t.tradeId));
       pullStatus = {
@@ -48,6 +51,7 @@ async function loadFromDB() {
         completedAt: null, progress: Math.round((cp.pulledRecords / cp.totalRecords) * 100),
         totalRecords: cp.totalRecords, pulledRecords: cp.pulledRecords,
         batchNumber: cp.batchNumber, totalBatches: cp.totalBatches, error: null,
+        pullSeed: cp.pullSeed,
       };
       _resumePull(cp);
       return;
@@ -100,10 +104,22 @@ function broadcast(event, data) {
 
 // ─── Pull ─────────────────────────────────────────────────────────────────────
 async function startPull() {
+  // Per-process guard (fast path for both dev and DB modes).
   if (pullStatus.state === "running") return { started: false, reason: "Pull already running" };
 
+  // Cross-process guard: a MongoDB-backed lease so multiple replicas cannot
+  // run the same pull at once (horizontal scaling). Dev (no DB) uses the
+  // in-memory flag above as its only guard.
+  if (isDbConnected()) {
+    const lock = await acquirePullLock(LOCK_LEASE_MS);
+    if (!lock) return { started: false, reason: "Pull already running on another instance" };
+  }
+
   stagingTrades = [];
-  const allTrades   = generateTrades(2000);
+  // Compute and store the pullSeed so a resume across a 5-minute seed boundary
+  // replays with the SAME seed (deterministic resume — Fix #3 / finding §3.3).
+  const pullSeed   = Math.floor(Date.now() / (5 * 60 * 1000));
+  const allTrades  = generateTrades(2000, pullSeed);
   const BATCH_COUNT = 20;
   const batchSize   = Math.ceil(allTrades.length / BATCH_COUNT);
   const batchDelay  = PULL_DURATION_MS / BATCH_COUNT;
@@ -113,6 +129,7 @@ async function startPull() {
     completedAt: null, progress: 0,
     totalRecords: allTrades.length, pulledRecords: 0,
     batchNumber: 0, totalBatches: BATCH_COUNT, error: null,
+    pullSeed,
   };
 
   // Persist initial checkpoint (Fix #2)
@@ -126,7 +143,7 @@ async function startPull() {
 
 // Separate function so resume can call it from any batch index
 async function _resumePull(cp) {
-  const allTrades   = generateTrades(2000);
+  const allTrades   = generateTrades(2000, cp.pullSeed);
   const BATCH_COUNT = cp.totalBatches;
   const batchSize   = Math.ceil(allTrades.length / BATCH_COUNT);
   const batchDelay  = PULL_DURATION_MS / BATCH_COUNT;
@@ -144,6 +161,8 @@ function _runBatches(allTrades, batchSize, batchDelay, BATCH_COUNT, startBatch) 
   (async () => {
     for (let b = startBatch; b < BATCH_COUNT; b++) {
       await sleep(batchDelay);
+      // Keep the distributed lease alive across a long pull.
+      if (isDbConnected()) { try { await renewPullLock(LOCK_LEASE_MS); } catch (e) { console.warn("[Lock] renew failed:", e.message); } }
       const batch = allTrades.slice(b * batchSize, (b + 1) * batchSize);
       stagingTrades.push(...batch);
 
@@ -188,10 +207,12 @@ function _runBatches(allTrades, batchSize, batchDelay, BATCH_COUNT, startBatch) 
 
     broadcast("pull_complete", { totalRecords: committedTrades.length, completedAt: pullStatus.completedAt });
     console.log(`[Pull] Complete — ${committedTrades.length} trades committed.`);
-  })().catch(err => {
+    if (isDbConnected()) { try { await releasePullLock(); } catch (e) { console.warn("[Lock] release failed:", e.message); } }
+  })().catch(async err => {
     pullStatus.state = "failed"; pullStatus.error = err.message;
     broadcast("pull_error", { error: err.message });
     console.error("[Pull] Error:", err);
+    if (isDbConnected()) { try { await releasePullLock(); } catch (_) {} }
   });
 }
 
@@ -213,6 +234,7 @@ async function _saveCheckpoint(batchNumber, currentStaging) {
         updatedAt:     new Date().toISOString(),
         // Compact: just IDs, not full trade objects
         stagedTradeIds: tradeIds,
+        pullSeed:       pullStatus.pullSeed,
       },
       { upsert: true, new: true }
     );
@@ -223,9 +245,10 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ─── Accessors ────────────────────────────────────────────────────────────────
 function getCommittedTrades() {
-  return (pullStatus.state === "running" && stagingTrades.length > 0)
-    ? [...stagingTrades, ...committedTrades]
-    : committedTrades;
+  // Return only committed trades — serving staging+committed during a running
+  // pull produced duplicate tradeIds (React key collisions). The dashboard
+  // receives live progress via SSE deltas (pull_progress), not REST reads.
+  return committedTrades;
 }
 function getPullStatus()    { return { ...pullStatus }; }
 function getSseClientCount(){ return sseClients.size;  }

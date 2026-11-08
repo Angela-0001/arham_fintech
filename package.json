@@ -6,7 +6,14 @@
   "scripts": {
     "server": "node server/index.js",
     "client": "npm run dev --prefix client",
-    "dev": "npm run server & npm run client",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "test": "npm run test --prefix server && npm run test --prefix client",
     "install:all": "npm install --prefix server && npm install --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "dependencies": {
+    "arham-fintech-bse-dashboard": "file:"
   }
 }

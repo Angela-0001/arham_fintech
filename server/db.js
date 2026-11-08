@@ -14,6 +14,9 @@ async function connectDB() {
 
   const uri = process.env.MONGO_URI;
   if (!uri) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("FATAL: MONGO_URI must be set in production.");
+    }
     console.warn("[DB] MONGO_URI not set — running without persistence.");
     return;
   }

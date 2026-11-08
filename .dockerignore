@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+.git
+.github
+.agents
+logs
+**/.env
+**/.env.local
+**/.env.production
+**/test
+**/*.test.js
+**/*.test.jsx
+**/vitest.config.js
+**/vitest.setup.js
+npm-debug.log*

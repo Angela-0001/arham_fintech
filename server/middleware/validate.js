@@ -2,7 +2,6 @@
  * validate.js — Input validation for query parameters.
  */
 
-const MAX_LIMIT = 5000;
 const VALID_SYMBOLS = new Set([
   "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","WIPRO","BHARTIARTL",
   "BAJFINANCE","SBIN","HINDUNILVR","ITC","KOTAKBANK","LT","ASIANPAINT",
@@ -11,10 +10,19 @@ const VALID_SYMBOLS = new Set([
   "ADANIENT","ADANIPORTS","JSWSTEEL",
 ]);
 
+const MAX_PAGE_SIZE = 500;
+const DEFAULT_PAGE_SIZE = 200;
+
+function isPositiveInt(value) {
+  // Reject NaN, non-integers, and anything < 1.
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1;
+}
+
 function validateTradeQuery(req, res, next) {
   const errors = [];
 
-  const { symbol, tradeType, limit, from, to } = req.query;
+  const { symbol, tradeType, from, to, page, pageSize } = req.query;
 
   // symbol — must be a known BSE symbol
   if (symbol && !VALID_SYMBOLS.has(symbol.toUpperCase())) {
@@ -26,25 +34,40 @@ function validateTradeQuery(req, res, next) {
     errors.push(`Invalid tradeType "${tradeType}". Must be BUY or SELL.`);
   }
 
-  // limit — positive integer, capped at MAX_LIMIT
-  if (limit !== undefined) {
-    const n = parseInt(limit, 10);
-    if (isNaN(n) || n < 1) {
-      errors.push(`Invalid limit "${limit}". Must be a positive integer.`);
-    } else if (n > MAX_LIMIT) {
-      // Don't error — just cap silently and note in response
-      req.query.limit = String(MAX_LIMIT);
-    }
+  // page — positive integer (default 1). NaN/non-int/<1 → 400.
+  if (page !== undefined && !isPositiveInt(page)) {
+    errors.push(`Invalid page "${page}". Must be a positive integer.`);
+  } else if (errors.length === 0) {
+    req.query.page = Math.max(parseInt(page, 10) || 1, 1);
   }
 
-  // from / to — must be valid ISO date strings
-  if (from && isNaN(Date.parse(from))) {
-    errors.push(`Invalid from date "${from}". Must be ISO 8601 format.`);
+  // pageSize — positive integer (default 200, clamp 1–500). NaN/non-int/<1 → 400.
+  if (pageSize !== undefined && !isPositiveInt(pageSize)) {
+    errors.push(`Invalid pageSize "${pageSize}". Must be a positive integer.`);
+  } else if (errors.length === 0) {
+    const ps = Math.min(Math.max(parseInt(pageSize, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+    req.query.pageSize = ps;
   }
-  if (to && isNaN(Date.parse(to))) {
-    errors.push(`Invalid to date "${to}". Must be ISO 8601 format.`);
+
+  // from / to — must be valid dates; normalize to ISO-8601 so the lexical
+  // compare in the routes is correct (e.g. "01/01/2024" → "2024-01-01T...").
+  if (from) {
+    const d = new Date(from);
+    if (isNaN(d.getTime())) {
+      errors.push(`Invalid from date "${from}". Must be a parseable date.`);
+    } else {
+      req.query.from = d.toISOString();
+    }
   }
-  if (from && to && Date.parse(from) > Date.parse(to)) {
+  if (to) {
+    const d = new Date(to);
+    if (isNaN(d.getTime())) {
+      errors.push(`Invalid to date "${to}". Must be a parseable date.`);
+    } else {
+      req.query.to = d.toISOString();
+    }
+  }
+  if (req.query.from && req.query.to && Date.parse(req.query.from) > Date.parse(req.query.to)) {
     errors.push(`"from" date must be before "to" date.`);
   }
 
@@ -58,6 +81,10 @@ function validateTradeQuery(req, res, next) {
   if (errors.length > 0) {
     return res.status(400).json({ error: "Validation failed", details: errors });
   }
+
+  // Ensure defaults are set even when params are absent
+  if (!req.query.page)     req.query.page = 1;
+  if (!req.query.pageSize) req.query.pageSize = DEFAULT_PAGE_SIZE;
 
   next();
 }

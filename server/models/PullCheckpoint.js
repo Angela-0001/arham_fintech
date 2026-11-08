@@ -16,6 +16,7 @@ const schema = new mongoose.Schema({
   startedAt:     String,
   updatedAt:     String,
   stagedTradeIds: { type: [String], default: [] }, // compact: IDs only
+  pullSeed:       { type: Number },                  // seed used for this pull (resume determinism)
 }, { _id: false, versionKey: false, collection: "pull_checkpoint" });
 
 module.exports = mongoose.model("PullCheckpoint", schema);

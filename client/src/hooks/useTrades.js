@@ -5,8 +5,9 @@
  * Fix #6  — loading timeout fallback so spinner never hangs forever
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { API_URL } from '../config.js';
 
-const API        = import.meta.env.VITE_API_URL || 'http://localhost:4000/proxy';
+const API        = API_URL;
 const PAGE_SIZE  = 500;
 const MAX_PAGES  = 5; // hard cap = 2500 records max
 const LOAD_TIMEOUT_MS = 8000; // Fix #6: clear loading after 8s no matter what
@@ -20,6 +21,7 @@ export function useTrades() {
   const [loading,      setLoading]      = useState(true);
   const esRef          = useRef(null);
   const fetchTradesRef = useRef(null);
+  const notifTimer     = useRef(null);
 
   // ── fetch with pagination + page cap warning (Fix #4) ─────────────────────
   const fetchTrades = useCallback(async () => {
@@ -129,6 +131,7 @@ export function useTrades() {
 
     return () => {
       clearTimeout(loadingTimer);
+      clearTimeout(notifTimer.current);
       es.close();
       setConnected(false);
     };
@@ -136,7 +139,10 @@ export function useTrades() {
 
   function showNotification(type, message) {
     setNotification({ type, message });
-    setTimeout(() => setNotification(null), 6000);
+    // Reset the auto-clear timer on each new notification so a fast second
+    // notification is not cleared early by the first timer.
+    clearTimeout(notifTimer.current);
+    notifTimer.current = setTimeout(() => setNotification(null), 6000);
   }
 
   async function triggerPull() {

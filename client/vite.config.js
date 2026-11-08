@@ -5,10 +5,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: {
-      '/getTrades': 'http://localhost:4000',
-      '/api':       'http://localhost:4000',
-    },
   },
   build: {
     rollupOptions: {
@@ -19,5 +15,10 @@ export default defineConfig({
         },
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.js'],
   },
 })
