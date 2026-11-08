@@ -139,7 +139,7 @@ sequenceDiagram
     B->>S: auto-reconnect (retry 3s) + Last-Event-ID
     S-->>B: replay missed events from 200-event ring buffer
 
-    S->>DB: bulkWrite upsert on completion (idempotent — no duplicates)
+    S->>DB: INSERT … ON DUPLICATE KEY UPDATE (idempotent — no duplicates)
     S-->>B: pull_complete (signal only)
     B->>S: GET /proxy/getTrades (re-fetch full dataset)
     S-->>B: 2,000 trades

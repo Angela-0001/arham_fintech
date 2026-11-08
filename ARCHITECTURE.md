@@ -115,11 +115,11 @@ SSE is HTTP/1.1-compatible, unidirectional (server→client, which is all we nee
 
 ## Persistence & Resume
 
-- **Idempotent writes:** on completion, trades are upserted with `bulkWrite`
-  keyed on `tradeId` (`_id = tradeId`). Re-running a pull updates rather than
-  duplicates — safe to retry.
+- **Idempotent writes:** on completion, trades are upserted with
+  `INSERT … ON DUPLICATE KEY UPDATE` keyed on `trade_id`. Re-running a pull
+  updates rather than duplicates — safe to retry.
 - **Checkpoint:** each batch saves only the staged trade IDs + the pull's seed
-  to a single `pull_checkpoint` document (compact — never near the 16MB limit).
+  to a single `pull_checkpoint` row (compact — IDs only, not full trade objects).
 - **Resume:** on restart, if a checkpoint shows a pull in progress, the server
   regenerates the full trade set from the **stored seed** and filters by the
   saved IDs, then continues from the next batch. Using the stored seed (not a
