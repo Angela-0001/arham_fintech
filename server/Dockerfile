@@ -12,5 +12,5 @@ COPY server/ ./
 # drop test artifacts from the production image
 RUN rm -rf test vitest.config.js
 EXPOSE 4000
-# Required at runtime (set via env / compose): MONGO_URI, API_KEY, ALLOWED_ORIGINS
+# Required at runtime (set via env / compose): MYSQL_HOST/MYSQL_URI, API_KEY, ALLOWED_ORIGINS
 CMD ["node", "index.js"]

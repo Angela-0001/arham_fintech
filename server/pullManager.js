@@ -1,7 +1,7 @@
 /**
  * pullManager.js — BSE pull lifecycle + SSE broadcast
  *
- * MySQL edition. All Mongoose references replaced with mysql2 helpers.
+ * Uses mysql2 for persistence.
  * The SSE broadcast / ring-buffer / replay machinery is intentionally
  * untouched — that's the headline resilience feature.
  */

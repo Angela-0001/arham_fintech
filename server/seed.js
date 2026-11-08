@@ -42,7 +42,7 @@ function mulberry32(seed) {
  * Generate trades.
  * Fix #5: pullSeed changes each pull so prices/timestamps differ,
  * making the dashboard show visibly fresh data after each pull.
- * tradeIds are stable (based on index) so MongoDB upserts work correctly.
+ * tradeIds are stable (based on index) so MySQL upserts work correctly.
  */
 function generateTrades(count = 2000, pullSeed = null) {
   // Default seed: current 5-minute bucket — same within a pull, different across pulls

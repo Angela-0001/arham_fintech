@@ -132,8 +132,8 @@ SSE is HTTP/1.1-compatible, unidirectional (server→client, which is all we nee
 
 - **Single instance (dev):** an in-memory `pullStatus.state === "running"` flag
   prevents a second pull on the same process.
-- **Multiple replicas (production):** a MongoDB-backed lease
-  (`pull_lock` collection) guards `startPull` with an atomic conditional
+- **Multiple replicas (production):** a MySQL-backed lease
+  (`pull_lock` table) guards `startPull` with an atomic conditional
   update — a replica only starts a pull if the lock is unheld or its lease has
   expired. The lease is renewed each batch and released on completion/failure,
   so a crashed replica's lock auto-expires and another replica can take over.

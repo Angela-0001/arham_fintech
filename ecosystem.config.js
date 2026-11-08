@@ -2,7 +2,7 @@
 //   pm2 start ecosystem.config.js
 //   pm2 start ecosystem.config.js --env production
 // Set >1 instances for horizontal scaling; pull concurrency is guarded by a
-// MongoDB-backed lease (server/pullLock.js) so replicas won't double-run pulls.
+// MySQL-backed lease (server/pullLock.js) so replicas won't double-run pulls.
 module.exports = {
   apps: [
     {

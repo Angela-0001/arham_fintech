@@ -122,7 +122,7 @@ does one normal request to load all the trades.
 sequenceDiagram
     participant B as Browser (EventSource)
     participant S as Express Server
-    participant DB as MongoDB
+    participant DB as MySQL
 
     B->>S: GET /proxy/getTrades  (instant load of committed data)
     S-->>B: committed trades (instant)
@@ -169,8 +169,8 @@ sequenceDiagram
 └──────────────────────────────────────────────────────────┘
                           │
 ┌──────────────────────────────────────────────────────────┐
-│   MongoDB  ─► idempotent upserts (keyed on tradeId)       │
-│              + pull_checkpoint (resume after crash)       │
+│   MySQL  ─► idempotent upserts (INSERT … ON DUPLICATE KEY UPDATE) │
+│             + pull_checkpoint (resume after crash)        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -184,7 +184,7 @@ sequenceDiagram
 | `seed.js` | Generates ~2,000 deterministic synthetic trades (the stand-in for the real BSE feed). |
 | `/proxy/events` | The SSE endpoint the browser uses (BFF — no API key needed in the browser). |
 | `useTrades.js` | The React hook that opens the EventSource, handles reconnect, and re-fetches on `pull_complete`. |
-| MongoDB | Stores committed trades with idempotent upserts (re-running a pull never duplicates) and a checkpoint so a crashed pull can resume. |
+| MySQL | Stores committed trades with idempotent upserts (re-running a pull never duplicates) and a checkpoint so a crashed pull can resume. |
 
 ### Bonus: survives a crash mid-pull
 
@@ -200,7 +200,6 @@ consistent even if the restart crosses a 5-minute seed boundary.
 The default 15-minute pull is too slow to watch, so speed it up for a demo:
 
 ```powershell
-$env:MONGO_URI = ""              # run in-memory (no database needed)
 $env:PULL_DURATION_MS = "30000" # 30-second pull so the demo moves fast
 npm run dev
 ```
